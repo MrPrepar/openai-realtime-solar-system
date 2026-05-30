@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner == github.repository_owner && format('{0}', github.repository) }}
+  IMAGE_NAME: mrprepar/openai-realtime-solar-system
 
 jobs:
   build:
