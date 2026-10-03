@@ -4,7 +4,12 @@ import Controls from "@/components/controls";
 import Scene from "@/components/scene";
 import Logs from "@/components/logs";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { INSTRUCTIONS, TOOLS } from "@/lib/config";
+import {
+  INSTRUCTIONS,
+  MIRROR_INSTRUCTIONS,
+  MIRROR_TOOLS,
+  TOOLS,
+} from "@/lib/config";
 import { REALTIME_CALLS_URL } from "@/lib/constants";
 
 type ToolCallOutput = {
@@ -33,6 +38,14 @@ export default function App() {
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const audioTransceiver = useRef<RTCRtpTransceiver | null>(null);
   const tracks = useRef<RTCRtpSender[] | null>(null);
+
+  // Mirror mode (?mirror=1): connects on load, hides the controls and ends
+  // itself when the user is done, so it can run without mouse or keyboard.
+  const [isMirror, setIsMirror] = useState(false);
+  const mirrorIdleMs = useRef(90_000);
+  const lastActivity = useRef(Date.now());
+  const hasAutoStarted = useRef(false);
+  const [endRequested, setEndRequested] = useState(false);
 
   // Start a new realtime session
   async function startSession() {
@@ -237,6 +250,12 @@ export default function App() {
         arguments: output.arguments,
       };
       console.log("Tool call:", toolCall);
+      if (toolCall.name === "end_session") {
+        // Give the goodbye a moment to finish playing before hanging up
+        setTimeout(() => setEndRequested(true), 2500);
+        return;
+      }
+
       setToolCall(toolCall);
 
       // TOOL CALL HANDLING
@@ -274,9 +293,18 @@ export default function App() {
       }
     }
 
+    const isMirrorSession = isMirror;
+
     if (dataChannel) {
       const handleMessage = (e: MessageEvent) => {
         const event = JSON.parse(e.data);
+
+        if (
+          event.type === "input_audio_buffer.speech_started" ||
+          event.type === "response.done"
+        ) {
+          lastActivity.current = Date.now();
+        }
 
         if (event.type === "error") {
           console.error("Realtime error:", event);
@@ -309,8 +337,10 @@ export default function App() {
           type: "session.update",
           session: {
             type: "realtime",
-            tools: TOOLS,
-            instructions: INSTRUCTIONS,
+            tools: isMirrorSession ? MIRROR_TOOLS : TOOLS,
+            instructions: isMirrorSession
+              ? INSTRUCTIONS + MIRROR_INSTRUCTIONS
+              : INSTRUCTIONS,
           },
         };
 
@@ -329,7 +359,46 @@ export default function App() {
         dataChannel.removeEventListener("open", handleOpen);
       };
     }
-  }, [dataChannel, sendClientEvent]);
+  }, [dataChannel, sendClientEvent, isMirror]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("mirror") !== "1") return;
+
+    const idle = Number(params.get("idle"));
+    if (idle > 0) mirrorIdleMs.current = idle * 1000;
+    setIsMirror(true);
+
+    if (!hasAutoStarted.current) {
+      hasAutoStarted.current = true;
+      startSession();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // End the session when nobody has spoken for a while
+  useEffect(() => {
+    if (!isMirror || !isSessionActive) return;
+    lastActivity.current = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - lastActivity.current > mirrorIdleMs.current) {
+        console.log("Mirror idle timeout reached.");
+        setEndRequested(true);
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [isMirror, isSessionActive]);
+
+  useEffect(() => {
+    if (!endRequested) return;
+    setEndRequested(false);
+    stopSession();
+    // Let the MagicMirror module know it can close the frame
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "solar-system:ended" }, "*");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endRequested]);
 
   const handleConnectClick = async () => {
     if (isSessionActive) {
@@ -356,13 +425,17 @@ export default function App() {
   return (
     <div className="relative size-full">
       <Scene toolCall={toolCall} />
-      <Controls
-        handleConnectClick={handleConnectClick}
-        handleMicToggleClick={handleMicToggleClick}
-        isConnected={isSessionActive}
-        isListening={isListening}
-      />
-      <Logs messages={logs} />
+      {!isMirror && (
+        <>
+          <Controls
+            handleConnectClick={handleConnectClick}
+            handleMicToggleClick={handleMicToggleClick}
+            isConnected={isSessionActive}
+            isListening={isListening}
+          />
+          <Logs messages={logs} />
+        </>
+      )}
     </div>
   );
 }

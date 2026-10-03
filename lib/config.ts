@@ -124,6 +124,23 @@ export const TOOLS = toolsDefinition.map((tool) => ({
   ...tool,
 }));
 
+// Only offered in mirror mode, where there is no button to hang up with
+export const MIRROR_TOOLS = [
+  ...TOOLS,
+  {
+    type: "function",
+    name: "end_session",
+    description:
+      "End the conversation and close the solar system when the user is done, for example 'thank you, that was all' or 'close the solar system'",
+    parameters: {},
+  },
+];
+
+export const MIRROR_INSTRUCTIONS = `
+You are running on a smart mirror in a family home. There is no screen to click, so the user can only talk to you.
+When the user says they are done or asks you to close the solar system, say a short goodbye and then call the end_session tool. Use end_session instead of reset_camera in that case.
+`;
+
 export const INSTRUCTIONS = `
 You are an assistant helping users navigate a 3D solar system and understand the planets and their orbits.
 
