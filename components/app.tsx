@@ -1,8 +1,9 @@
 "use client";
 
 import Controls from "@/components/controls";
-import Scene from "@/components/scene";
+import LiteScene from "@/components/lite-scene";
 import Logs from "@/components/logs";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   INSTRUCTIONS,
@@ -11,6 +12,9 @@ import {
   TOOLS,
 } from "@/lib/config";
 import { REALTIME_CALLS_URL } from "@/lib/constants";
+
+// Loaded on demand, so the lite scene doesn't download the Spline runtime
+const Scene = dynamic(() => import("@/components/scene"), { ssr: false });
 
 type ToolCallOutput = {
   response: string;
@@ -42,6 +46,9 @@ export default function App() {
   // Mirror mode (?mirror=1): connects on load, hides the controls and ends
   // itself when the user is done, so it can run without mouse or keyboard.
   const [isMirror, setIsMirror] = useState(false);
+  // ?lite=1 swaps the Spline scene for a 2D one, for weak GPUs like the Pi 4
+  const [isLite, setIsLite] = useState<boolean | null>(null);
+  const [issPosition, setIssPosition] = useState<any>(null);
   const mirrorIdleMs = useRef(90_000);
   const lastActivity = useRef(Date.now());
   const hasAutoStarted = useRef(false);
@@ -266,10 +273,12 @@ export default function App() {
 
       // Handle special tool calls
       if (toolCall.name === "get_iss_position") {
+        setIssPosition(null);
         const issPosition = await fetch("/api/iss").then((response) =>
           response.json()
         );
         console.log("ISS position:", issPosition);
+        setIssPosition(issPosition);
         toolCallOutput.issPosition = issPosition;
       }
 
@@ -363,6 +372,7 @@ export default function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    setIsLite(params.get("lite") === "1");
     if (params.get("mirror") !== "1") return;
 
     const idle = Number(params.get("idle"));
@@ -424,7 +434,10 @@ export default function App() {
 
   return (
     <div className="relative size-full">
-      <Scene toolCall={toolCall} />
+      {isLite === true && (
+        <LiteScene toolCall={toolCall} issPosition={issPosition} />
+      )}
+      {isLite === false && <Scene toolCall={toolCall} />}
       {!isMirror && (
         <>
           <Controls
